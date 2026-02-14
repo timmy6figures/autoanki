@@ -13,7 +13,7 @@ For example, Harry Potter. This book will have normal distribution for most word
 
 The intention of this package was to allow Chinese learners to move from beginner books to more advanced material. I found there was a gap in knowledge going from beginner learning books (where there is little specalized terminology), to teen novels, where each novel will generally have its own specialized terminology, making the transition tedious. This is solved by automatically making Anki decks that have this specialized terminology, so that you are able to memorize these words while continuing to make progress
 
-With autoanki, you selectively add words to an Anki file to continue progressing with your lanuage learning skills.
+With autoanki, you selectively add words to an Anki file to continue progressing with your language learning skills.
 
 ## Usage
 

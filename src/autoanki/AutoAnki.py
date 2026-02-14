@@ -1,17 +1,15 @@
+import importlib.metadata
 import logging
-import pandas as pd
-import pdfplumber
 import os
-import ebooklib
-from ebooklib import epub
-from bs4 import BeautifulSoup
-import importlib.metadata
-import importlib.metadata
-import time
 import sys
+import time
 from glob import glob
 from pprint import pprint
-from pprint import pformat
+
+import ebooklib
+import pandas as pd
+from bs4 import BeautifulSoup
+from ebooklib import epub
 
 from autoanki.adapters import *
 from autoanki.DeckManager import DeckManager
@@ -26,14 +24,6 @@ MAGENTA = "\u001b[35m"
 CYAN = "\u001b[36m"
 WHITE = "\u001b[37m"
 RESET = "\u001b[0m"
-
-
-def get_adapter(language_code: str, settings) -> LanguageAdapter | None:
-    if language_code == "zh":
-        return ChineseAdapter(settings)
-    elif language_code == "fr":
-        return FrenchAdapter(settings)
-    return None
 
 
 def get_folder_contents(directory: str) -> str:
@@ -61,12 +51,14 @@ def get_folder_contents(directory: str) -> str:
 
 
 class AutoAnki:
+
     def __init__(
         self,
         language_code: str = "zh",
         debug_level=20,
         log_file=None,
         settings={},
+        dictionary=None,
     ):
         """
         Creates an instance of autoanki.
@@ -109,9 +101,13 @@ class AutoAnki:
         )
 
         total_start = time.time()
-        self.language_adapter = get_adapter(language_code, settings)
+        self.language_adapter = self.get_adapter(language_code, settings)
         if not self.language_adapter:
             self.logger.error(f"Unsupported language: [{language_code}]")
+            return
+
+        if dictionary:
+            self.language_adapter.set_dictionary(dictionary)
 
         self.deck_manager = DeckManager(debug_level=debug_level)
 
@@ -129,7 +125,10 @@ class AutoAnki:
         """
         self.logger.debug(f"autoanki: Adding [{book_name}] from string")
         if not contents:
-            self.logger.info(f"No contents supplied")
+            self.logger.info("No contents supplied")
+            return
+        if not self.language_adapter:
+            self.logger.warning("Can't add book. Language adapter not loaded")
             return
 
         tokens = self.language_adapter.tokenize(contents)
@@ -144,28 +143,13 @@ class AutoAnki:
         """
         self.logger.debug(f"autoanki: Adding [{book_name}] from file: [{filepath}]")
         if not filepath:
-            self.logger.info(f"No filepath supplied")
+            self.logger.info("No filepath supplied")
+            return
+        if not self.language_adapter:
+            self.logger.warning("Can't add book. Language adapter not loaded")
             return
 
-        # Handle pdf
         extension = os.path.splitext(filepath)[1]
-
-        # TODO handle PDFs
-        #        if extension == ".pdf":
-        #            self.logger.info(f"PDF detected")
-        #            # for every page
-        #            print(filepath)
-        #            print(os.path.exists(filepath))
-        #
-        #            with pdfplumber.open(filepath) as pdf:
-        #                print(pdf)
-        #                for pages in pdf.pages:
-        #                    print(pages.pages)
-        #                    # print(pages.extract_text())
-        #
-        #                    text = pages.extract_text()
-        #                    tokens = self.language_adapter.tokenize(text)
-        #                    self.language_adapter.store(tokens)
 
         if extension == ".epub":
             book = epub.read_epub(filepath)
@@ -192,19 +176,19 @@ class AutoAnki:
             text = soup.find_all(text=True)
             for t in text:
                 if t.parent.name not in blacklist:
-                    contents += "{} ".format(t)
+                    contents += f"{t} "
 
             tokens = self.language_adapter.tokenize(contents)
             self.language_adapter.store(tokens, book_name)
 
         elif extension == ".txt":
-            self.logger.info(f"txt detected")
+            self.logger.info("txt detected")
             # Add the book to the database
             if not os.path.isfile(filepath):
                 self.logger.warning(f"File does not exist: [{filepath}]")
                 return
 
-            with open(filepath, "r") as file:
+            with open(filepath) as file:
                 contents = file.read()
             tokens = self.language_adapter.tokenize(contents)
             self.language_adapter.store(tokens, book_name)
@@ -219,12 +203,13 @@ class AutoAnki:
             `book_name`: The name of the book being added e.g. "Lost Prince"
         """
         # TODO this is broken
-        self.logger.debug(
-            f"autoanki: Adding [{book_name}] from directory: [{directory}]"
-        )
+        self.logger.debug( f"autoanki: Adding [{book_name}] from directory: [{directory}]")
+        if not self.language_adapter:
+            self.logger.warning("Can't add book. Language adapter not loaded")
+            return
 
         if not directory:
-            self.logger.warning(f"No directory supplied")
+            self.logger.warning("No directory supplied")
             return
 
         # Add the book to the database
@@ -240,12 +225,15 @@ class AutoAnki:
             `book_name`: The name of the book being added e.g. "Lost Prince"
         """
         self.logger.debug(f"autoanki: Adding [{book_name}] from pleco: [{filepath}]")
-
-        if not filepath:
-            self.logger.warning(f"No filepath supplied")
+        if not self.language_adapter:
+            self.logger.warning("Can't add book. Language adapter not loaded")
             return
 
-        with open(filepath, "r") as file:
+        if not filepath:
+            self.logger.warning("No filepath supplied")
+            return
+
+        with open(filepath) as file:
             contents = file.read()
             for line in file.readlines():
                 split_line = line.split(" ")
@@ -256,10 +244,17 @@ class AutoAnki:
         self.logger.debug(f"Done reading Pleco. len: {len(contents)}")
         tokens = self.language_adapter.tokenize(contents)
         self.language_adapter.store(tokens, book_name)
-
-    def pprint_unfinished_definitions(self):
-        pprint(self.database_manager.unfinished_definitions())
-
+    
+    def get_adapter(self, language_code: str, settings) -> LanguageAdapter | None:
+        # TODO This should be static
+        MAP = {
+            "zh": ChineseAdapter,
+            "fr": FrenchAdapter 
+        }
+        if language_code not in MAP.keys():
+            return None
+        return MAP[language_code](settings)
+    
     def get_number_of_words(self):
         return self.language_adapter.get_number_of_entries()
 
@@ -275,6 +270,9 @@ class AutoAnki:
         `filepath` Path to the file
         :return:
         """
+        if not self.language_adapter:
+            self.logger.warning("Can't add book. Language adapter not loaded")
+            return
 
         self.logger.info(f"Generating deck file [{deck_name}]")
         words = self.language_adapter.get_tokens_to_generate()
@@ -285,6 +283,9 @@ class AutoAnki:
             self.logger.info(f"Generated deck file [{deck_path}]")
 
     def save_dictionary_as_csv(self, filepath: str):
+        if not self.language_adapter:
+            self.logger.warning("Can't add book. Language adapter not loaded")
+            return
         # TODO this is broken
         self.logger.info("Saving to csv...")
         all = self.language_adapter.get_tokens_to_generate()
@@ -296,15 +297,18 @@ class AutoAnki:
         self.logger.info("Done saving to csv...")
 
     @property
-    def book_list(self) -> list[str]:
+    def tags(self) -> list[str] | None:
         """
-        Get a list of the books in the database
-        :return: List of book names
+        Get a list of tags in the database
+        :return: List of tags
         """
-        return self.language_adapter.get_groups()
+        if not self.language_adapter:
+            self.logger.warning("Can't add book. Language adapter not loaded")
+            return
+        return self.language_adapter.get_tags()
 
-    @book_list.setter
-    def book_list(self, _):
+    @tags.setter
+    def tags(self, _):
         pass
 
     @property
